@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# AWS SAM build artifacts
+.aws-sam/
+
+# Virtual environment
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs and databases
+*.log
+
+# AWS credentials and config files
+.aws/
+
+# Python environment variables
+.env
+.env.*
+
+# MacOS files
+.DS_Store
+
+# VS Code settings
+.vscode/
+
+# Ignore audio files (opcional)
+*.mp3
+*.wav
+*.flac
+*.m4a
