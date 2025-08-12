@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Pipeline S3 + Transcribe + EventBridge + Lambda
+
+Globals:
+  Function:
+    Timeout: 900
+    Runtime: python3.12
+    MemorySize: 512
+
+Parameters:
+  AudioBucketName:
+    Type: String
+    Default: meu-podcast-audio
+  TranscriptBucketName:
+    Type: String
+    Default: meu-podcast-transcripts
+
+Resources:
+  ## Bucket de entrada
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AudioBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Function: !GetAtt StartTranscribeLambda.Arn
+
+  ## Bucket de saída
+  TranscriptBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref TranscriptBucketName
+
+  ## Lambda: inicia job Transcribe
+  StartTranscribeLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda_start_job/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref TranscriptBucketName
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref AudioBucketName
+        - S3WritePolicy:
+            BucketName: !Ref TranscriptBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:StartTranscriptionJob
+                - transcribe:GetTranscriptionJob
+              Resource: "*"
+      Events:
+        AudioUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref AudioBucket
+            Events: s3:ObjectCreated:Put
+
+  ## Lambda: processa resultado
+  ProcessTranscriptionLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda_process_result/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref TranscriptBucketName
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref TranscriptBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:GetTranscriptionJob
+              Resource: "*"
+
+  ## Regra EventBridge para job completado
+  TranscribeJobCompletedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - "aws.transcribe"
+        detail-type:
+          - "Transcribe Job State Change"
+        detail:
+          TranscriptionJobStatus:
+            - "COMPLETED"
+      Targets:
+        - Arn: !GetAtt ProcessTranscriptionLambda.Arn
+          Id: ProcessLambdaTarget
+
+  ## Permissão EventBridge -> Lambda
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProcessTranscriptionLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TranscribeJobCompletedRule.Arn
